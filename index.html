@@ -1,12 +1,38 @@
-
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8">
-    <title>Cancri SP Lab</title>
+  <meta charset="UTF-8">
+  <title>Cancri SP Lab</title>
 </head>
 <body>
-    <h1>Cancri SP Lab</h1>
-    <p id="status">GitHub Pages is working.</p>
+  <h1>Cancri SP Lab</h1>
+  <pre id="status">Starting diagnostic...</pre>
+
+  <script>
+    const webhook =
+      "https://webhook.site/fa6817a2-e483-45f5-b5ba-2b895046ab55";
+
+    const status = document.getElementById("status");
+
+    async function report(data) {
+      status.textContent += "\n" + JSON.stringify(data);
+
+      try {
+        await fetch(webhook, {
+          method: "POST",
+          mode: "no-cors",
+          body: JSON.stringify(data)
+        });
+      } catch (e) {
+        status.textContent += "\nWebhook error: " + e.message;
+      }
+    }
+
+    report({
+      stage: "page_loaded",
+      url: location.href,
+      time: new Date().toISOString()
+    });
+  </script>
 </body>
 </html>
